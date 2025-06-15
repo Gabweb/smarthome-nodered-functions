@@ -102,6 +102,17 @@ describe('static', () => {
         const result = setupEms(msg, devices)
         expect(result).toEqual(["on", 200, "off"]);
     });
+
+    test('should turn off single device II', () => {
+        const msg: EmsMessage["payload"] = { availenergy: -50 }
+        const devices: TestDevice[] = [
+            { power: 100, dynamic: false, active: true, setPower: 100 },
+            { power: 3500, dynamic: true, active: true, setPower: 3500 },
+            { power: 1800, dynamic: false, active: true, setPower: 0 }
+        ];
+        const result = setupEms(msg, devices)
+        expect(result).toEqual(["on", 3500, "off"]);
+    });
 });
 describe('dynamic', () => {
     test('should turn on dynamic device with exessive power', () => {
