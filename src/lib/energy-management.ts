@@ -10,6 +10,7 @@ export interface DeviceConfig {
 export type DeviceState = {
     active: boolean,
     setPower: number,
+    enabled?: boolean,
     actualPower?: number
 } & DeviceConfig;
 
@@ -17,6 +18,7 @@ export interface EmsMessage {
     payload: {
         [key: `device${number}`]: boolean | undefined;
         [key: `device${number}power`]: number | undefined;
+        [key: `device${number}enabled`]: boolean | undefined;
         availenergy?: number;
     }
 }
@@ -37,14 +39,22 @@ export function ems(
     node: NodeRed,
     devices: DeviceConfig[]
 ) {
-    const prevState: DeviceState[] = context.get("prev").slice() ?? devices.map(device => ({ ...device, active: false, actualPower: 0 }));
+    const prevState: DeviceState[] = context.get("prev") ?? devices.map(device => ({ ...device, active: false, actualPower: 0 }));
 
-    // Update active state
+    // Update device from msg
     prevState.forEach(device => {
         const active = msg.payload[`device${device.id}`]
-        device.active = active != null ? active : device.active;
+        const enabled = msg.payload[`device${device.id}enabled`] ?? true
+        device.active = enabled === false ? false :
+            active != null ? active : device.active;
+        device.setPower = device.active ? device.setPower : 0;
         device.actualPower = msg.payload[`device${device.id}power`];
+        device.enabled = enabled;
     })
+
+    // Filter out disabled devices
+    const enabledDevices = prevState
+        .filter(device => device.enabled !== false);
 
     let availEnergy = msg.payload.availenergy ?? 0
     let dynamicEnergy = 0
@@ -60,7 +70,7 @@ export function ems(
 
     // More energy available -> Can we turn on devices?
     if (availEnergy > 0) {
-        prevState
+        enabledDevices
             .filter(device => device.active == false)
             .forEach(device => {
                 if (availEnergy <= 0) {
@@ -78,7 +88,7 @@ export function ems(
     }
     // Less energy available -> Turn off!
     else if (availEnergy < 0) {
-        prevState
+        enabledDevices
             .filter(device => device.active == true)
             .reverse()
             .forEach(device => {
@@ -96,7 +106,7 @@ export function ems(
 
     // Update dynamic
     let availEnergyDynamic = availEnergy + dynamicEnergy
-    prevState
+    enabledDevices
         .filter(device => device.dynamic == true)
         .forEach(device => {
             availEnergyDynamic -= updateDynamicDevice(device, availEnergyDynamic)

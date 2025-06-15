@@ -39,6 +39,26 @@ describe('static', () => {
         expect(result).toEqual(["on", 0, "off"]);
     });
 
+    test('should ignore disabled device', () => {
+        const msg: EmsMessage["payload"] = { availenergy: 100, device0enabled: false }
+        const devices: TestDevice[] = [
+            { power: 100, dynamic: false, active: false, setPower: 100 },
+            { power: 100, dynamic: false, active: false, setPower: 200 },
+        ];
+        const result = setupEms(msg, devices)
+        expect(result).toEqual(["off", "on"]);
+    });
+
+    test('should turn off disabled device', () => {
+        const msg: EmsMessage["payload"] = { availenergy: 0, device0enabled: false }
+        const devices: TestDevice[] = [
+            { power: 100, dynamic: false, active: true, setPower: 100 },
+            { power: 100, dynamic: false, active: true, setPower: 100 },
+        ];
+        const result = setupEms(msg, devices)
+        expect(result).toEqual(["off", "on"]);
+    });
+
     test('should turn on first device which is in the budget', () => {
         const msg: EmsMessage["payload"] = { availenergy: 400 }
         const devices: TestDevice[] = [
