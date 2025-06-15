@@ -33,7 +33,7 @@ const devicesFoo: DeviceConfig[] = [
 
 export function ems(
     msg: EmsMessage,
-    context = new Map<string, any>(),
+    context: Map<string, any>,
     node: NodeRed,
     devices: DeviceConfig[]
 ) {
