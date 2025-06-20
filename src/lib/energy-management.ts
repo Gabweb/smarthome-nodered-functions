@@ -59,17 +59,17 @@ export function ems(
     let availEnergy = msg.payload.availenergy ?? 0
     let dynamicEnergy = 0
 
-    // Add device actual power to available energy
-    prevState.forEach(device => {
-        if (device.active && device.actualPower != null && device.actualPower > 0) {
-            availEnergy += device.actualPower;
-            device.active = false;
-            device.setPower = 0;
-        }
-    })
-
     // More energy available -> Can we turn on devices?
     if (availEnergy > 0) {
+        // Add device actual power to available energy
+        prevState.forEach(device => {
+            if (device.active && device.actualPower != null && device.actualPower > 0) {
+                availEnergy += device.actualPower;
+                device.active = false;
+                device.setPower = 0;
+            }
+        })
+
         enabledDevices
             .filter(device => device.active == false)
             .forEach(device => {
@@ -77,10 +77,11 @@ export function ems(
                     return;
                 }
 
-                if (device.power <= availEnergy) {
-                    if (device.dynamic == true) {
-                        dynamicEnergy += device.power
-                    }
+                if (device.dynamic == true) {
+                    availEnergy -= device.power
+                    dynamicEnergy += device.power
+                    device.active = true
+                } else if (device.power <= availEnergy) {
                     availEnergy -= device.power
                     device.active = true
                 }

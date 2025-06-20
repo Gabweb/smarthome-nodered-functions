@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "esnext",
-    "declaration": true,          // emit .d.ts files
+    "declaration": true, // emit .d.ts files
     "outDir": "dist",
     "rootDir": "src",
     "moduleResolution": "node",
@@ -10,7 +10,11 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "module": "commonjs",
-    "types": ["jest"]
+    "types": [
+      "jest"
+    ]
   },
-  "include": ["src/**/*", "test/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

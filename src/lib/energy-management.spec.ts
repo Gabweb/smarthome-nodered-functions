@@ -138,6 +138,28 @@ describe('dynamic', () => {
         expect(result).toEqual(["on", 20, "off"]);
     });
 
+    test('should turn off lowest prio device if there is enough power - even if devicepower is known', () => {
+        const msg: EmsMessage["payload"] = { availenergy: -100, device1power: 1000 }
+        const devices: TestDevice[] = [
+            { power: 100, dynamic: false, active: true, setPower: 100 },
+            { power: 1000, dynamic: true, active: true, setPower: 1000 },
+            { power: 300, dynamic: false, active: true, setPower: 300 }
+        ];
+        const result = setupEms(msg, devices)
+        expect(result).toEqual(["on", 1000, "off"]);
+    });
+
+    test('should ??', () => {
+        const msg: EmsMessage["payload"] = { availenergy: 3440, device1power: 90 }
+        const devices: TestDevice[] = [
+            { power: 200, dynamic: false, active: false, setPower: 0 },
+            { power: 3500, dynamic: true, active: true, setPower: 90 },
+            { power: 1800, dynamic: false, active: false, setPower: 0 }
+        ];
+        const result = setupEms(msg, devices)
+        expect(result).toEqual(["on", 3330, "off"]);
+    });
+
     // Without power info, we do not know if the device is actually running.
     // Therefore, we cannot be certain if we have power available for the higher prio device.
     test('should not turn on higher prio device if there is no power info', () => {
