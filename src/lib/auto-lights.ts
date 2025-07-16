@@ -35,8 +35,33 @@ export interface LightOutput {
 // Misc Types -----------------------------------
 export type ContextKeys = "prevMsg" | "prevState" | "timoeut";
 
-// -------------------------------------------------
+// Shared
+function stateToFill(output: LightOutput) {
+    switch (output.light) {
+        case Light.Direct: return "green"
+        case Light.Adjacent: return "yellow"
+        case Light.Off: return "red"
+    }
+}
 
+function wrapOutput(output: LightOutput): [{ payload: LightOutput }, { payload: any }] {
+    return [
+        {
+            payload: output
+        },
+        {
+            payload: { fill: stateToFill(output), text: output.light + " (" + output.reason + ")" },
+        }
+    ];
+}
+
+
+// On Start ---------------------------------
+function onStart(node: NodeRed) {
+    node.send(wrapOutput({ light: Light.Off, reason: "Init" }));
+}
+
+// On Msg -----------------------------------
 export function lightState(
     msg: LightStateMsg,
     context: Map<ContextKeys, any>,
@@ -78,12 +103,7 @@ export function lightState(
             newState = stateMachine(prevMsg, currMsg, prevState);
         }
 
-        if (!newState) {
-            // No change, just return
-            return;
-        }
-
-        if (newState.light != prevState.light) {
+        if (newState && newState.light != prevState.light) {
             context.set("prevState", newState)
             return wrapOutput(newState);
         }
@@ -178,26 +198,7 @@ export function lightState(
         }
     }
 
-    function stateToFill(output: LightOutput) {
-        switch (output.light) {
-            case Light.Direct: return "green"
-            case Light.Adjacent: return "yellow"
-            case Light.Off: return "red"
-        }
-    }
-
     function isButtonPress(input: LightInput | ButtonMsg): input is ButtonMsg {
         return (input as ButtonMsg).new_state !== undefined;
-    }
-
-    function wrapOutput(output: LightOutput): [{ payload: LightOutput }, { payload: any }] {
-        return [
-            {
-                payload: output
-            },
-            {
-                payload: { fill: stateToFill(output), text: output.light + " (" + output.reason + ")" },
-            }
-        ];
     }
 }

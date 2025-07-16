@@ -8,18 +8,22 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.4",
     "@types/jest": "^29.5.14",
     "@types/node": "^24.0.1",
     "jest": "^30.0.0",
     "merge-stream": "^2.0.0",
+    "rollup": "^4.45.1",
     "ts-jest": "^29.4.0",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.8.3"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "rm -rf ./dist && jest",
+    "build": "npm run tsc && npm run bundle && rm -rf ./dist/lib",
+    "tsc": "tsc -p tsconfig.json",
+    "bundle": "rollup -c",
+    "test": "jest",
     "test:watch": "jest --watch"
   },
   "exports": {

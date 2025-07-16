@@ -82,7 +82,7 @@ export function lightState(
             case "Manual": return 0.4
             case "Init": return 0
             case "Entering": return state.light == Light.Direct ? 0.4 : 1
-            case "Leaving": return 3
+            case "Leaving": return state.light == Light.Off ? 3 : 10
             case "Luminance": return 5
         }
         node.error(`Unknown reason state: ${state.reason}`);

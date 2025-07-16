@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "target": "esnext",
-    "declaration": true, // emit .d.ts files
+    "target": "es2023",
+    "declaration": false, // emit .d.ts files
     "outDir": "dist",
     "rootDir": "src",
     "moduleResolution": "node",
@@ -9,12 +9,15 @@
     "noImplicitAny": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "module": "commonjs",
+    "module": "ES2022",
     "types": [
       "jest"
     ]
   },
   "include": [
     "src/**/*"
+  ],
+  "exclude": [
+    "src/**/*.spec.ts"
   ]
 }
