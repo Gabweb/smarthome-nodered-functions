@@ -2,7 +2,7 @@ import { LightOutput } from "./auto-lights";
 import { Light } from "./lights";
 import { NodeRed, NodeRedMsg, NodeRedOutput } from "./node-red";
 
-type TransitionMsg = NodeRedMsg<LightOutput> | NodeRedMsg<boolean, "enabled">;
+export type TransitionMsg = NodeRedMsg<LightOutput> | NodeRedMsg<boolean, "enabled">;
 
 // Env Settings -----------------------------------
 export interface LightSettings {
@@ -18,11 +18,11 @@ export interface TransitionOutput {
 }
 
 // Misc Types -----------------------------------
-export type ContextKeys = "enabled";
+export type ContextKeys = "enabled" | "prevState";
 
 // -------------------------------------------------
 
-export function lightState(
+export function lightTransition(
     msg: TransitionMsg,
     context: Map<ContextKeys, any>,
     env: Map<keyof LightSettings, any>,
@@ -33,25 +33,33 @@ export function lightState(
 
     // Fun -----------------------------------
     function main(): NodeRedOutput<TransitionOutput> {
+        const disabledOutput: NodeRedOutput<TransitionOutput> = [
+            undefined,
+            { payload: { fill: 'grey', text: 'disabled' } }
+        ];
+
         if (isEnabledTopic(msg)) {
             context.set("enabled", msg.payload)
+        } else {
+            context.set("prevState", msg.payload)
         }
 
-        // TODO consider manual even if disabled
-        if (context.get("enabled") === false) {
-            return [
-                undefined,
-                { payload: { fill: 'grey', text: 'disabled' } }
-            ]
+        const enabled = context.get("enabled") ?? true;
+        const state = context.get("prevState") as LightOutput | undefined;
+
+        if (state === undefined) {
+            return undefined
         }
 
-        if (!isEnabledTopic(msg)) {
-            const transition = getTransition(msg.payload)
-            return [
-                { payload: transition },
-                { payload: { fill: transition.state == 'on' ? 'green' : 'grey', text: transition.brightness ? transition.brightness + "%" : "off" } }
-            ]
+        if (enabled === false && state.reason !== "Manual") {
+            return disabledOutput;
         }
+
+        const transition = getTransition(state)
+        return [
+            { payload: transition },
+            { payload: { fill: transition.state == 'on' ? 'green' : 'grey', text: transition.brightness ? transition.brightness + "%" : "off" } }
+        ]
     }
 
     function isEnabledTopic(msg: TransitionMsg): msg is NodeRedMsg<boolean, "enabled"> {

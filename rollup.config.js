@@ -1,4 +1,4 @@
-const files = ["auto-lights.js", "light-transitions.js", "energy-management.js"];
+const files = ["auto-lights.js", "light-transitions.js", "energy-management.js", "ems-avail-energy.js"];
 
 export default files.map(fileName => (
     // browser-friendly UMD build
