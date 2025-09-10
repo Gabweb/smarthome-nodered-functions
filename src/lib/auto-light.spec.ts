@@ -105,21 +105,27 @@ describe('light state: Direct', () => {
 
 describe('Manual', () => {
     test('should toggle light on', () => {
-        const state = setupState(Light.Off, { new_state: { attributes: { event_type: "single_push" } } });
+        const node = new DummyNodeRed();
+        const state = setupState(Light.Off, { new_state: { attributes: { event_type: "single_push" } } }, defaultSettings, undefined, node);
         expect(state).toEqual({ light: Light.Direct, reason: "Manual" });
-        jest.runAllTimers();
-    });
-
-    test('should toggle light on', () => {
-        const state = setupState(Light.Adjacent, { new_state: { attributes: { event_type: "single_push" } } });
-        expect(state).toEqual({ light: Light.Off, reason: "Manual" });
-        jest.runAllTimers();
+        jest.runOnlyPendingTimers();
+        expect(node.lastEmit?.[0].payload).toEqual({ light: Light.Off, reason: "Leaving" });
     });
 
     test('should toggle light off', () => {
-        const state = setupState(Light.Direct, { new_state: { attributes: { event_type: "single_push" } } });
+        const node = new DummyNodeRed();
+        const state = setupState(Light.Adjacent, { new_state: { attributes: { event_type: "single_push" } } }, defaultSettings, undefined, node);
         expect(state).toEqual({ light: Light.Off, reason: "Manual" });
-        jest.runAllTimers();
+        jest.runOnlyPendingTimers();
+        expect(node.lastEmit?.[0].payload).toEqual(undefined);
+    });
+
+    test('should toggle light off', () => {
+        const node = new DummyNodeRed();
+        const state = setupState(Light.Direct, { new_state: { attributes: { event_type: "single_push" } } }, defaultSettings, undefined, node);
+        expect(state).toEqual({ light: Light.Off, reason: "Manual" });
+        jest.runOnlyPendingTimers();
+        expect(node.lastEmit?.[0].payload).toEqual(undefined);
     });
 
     test('should return to automatic after timeout', () => {
@@ -139,10 +145,30 @@ describe('Manual', () => {
             node,
         )
         expect(state?.[0]?.payload).toEqual({ light: Light.Direct, reason: "Manual" });
-        jest.runAllTimers();
+        jest.runOnlyPendingTimers();
         expect(node.lastEmit?.[0].payload).toEqual({ light: Light.Off, reason: "Leaving" });
     });
 
+    test('should keep in manual (on) if light is on and occupancy', () => {
+        const node = new DummyNodeRed();
+        const env = new Map(Object.entries(defaultSettings)) as any;
+
+        const context = new Map<ContextKeys, any>();
+        const prevLightState: LightOutput = { light: Light.Off, reason: "Init" };
+        context.set("prevState", prevLightState);
+        const prevMsg: LightInput = { luminance: 999, directOccupancy: true, adjacentOccupancy: false };
+        context.set("prevMsg", prevMsg);
+
+        const state = lightState(
+            { payload: { new_state: { attributes: { event_type: "single_push" } } } },
+            context,
+            env,
+            node,
+        )
+        expect(state?.[0]?.payload).toEqual({ light: Light.Direct, reason: "Manual" });
+        jest.runOnlyPendingTimers();
+        expect(node.lastEmit?.[0].payload).toEqual(undefined);
+    });
 
     test('should ignore input changes in manual mode', () => {
         const node = new DummyNodeRed();
@@ -161,7 +187,8 @@ describe('Manual', () => {
             node,
         )
         expect(state?.[0]?.payload).toEqual(undefined);
-        jest.runAllTimers();
+        jest.runOnlyPendingTimers();
+        expect(node.lastEmit?.[0].payload).toEqual(undefined);
     });
 })
 

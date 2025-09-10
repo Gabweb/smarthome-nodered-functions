@@ -73,15 +73,13 @@ export function lightState(
 
     // Fun -----------------------------------
     function main() {
-        const manualTimeout = 10 * 60 * 1000; // 10 minutes
-
         const currMsg = msg.payload
-        const prevMsg: LightInput | undefined = context.get("prevMsg");
+        const prevMsg: LightInput | undefined = getPrevMsg();
+        const prevState: LightOutput = getPrevStateOrDefault();
+
         if (!isButtonPress(currMsg)) {
             context.set("prevMsg", currMsg);
         }
-
-        const prevState: LightOutput = context.get("prevState") ?? { light: Light.Off, reason: "Init" };
 
         let newState: LightOutput | undefined;
 
@@ -91,13 +89,8 @@ export function lightState(
                     light: prevState.light == Light.Off ? Light.Direct : Light.Off,
                     reason: "Manual"
                 };
-                clearTimeout(context.get("timoeut"));
 
-                const timeout = setTimeout(() => {
-                    resetManual(newState!, prevMsg);
-                }, manualTimeout)
-
-                context.set("timoeut", timeout);
+                setResetTimeout();
             }
         } else if (prevState.reason !== "Manual") {
             newState = stateMachine(prevMsg, currMsg, prevState);
@@ -109,19 +102,53 @@ export function lightState(
         }
     }
 
+    function setResetTimeout() {
+        clearTimeout(context.get("timoeut"));
 
-    function resetManual(prevState: LightOutput, prevMsg: LightInput | undefined) {
-        const input = prevMsg ?? { luminance: 0, directOccupancy: false, adjacentOccupancy: false };
-        if (!prevMsg) {
-            node.error("No previous message found, cannot reset state after manual timeout.");
-        }
-        const newOutput = stateMachine(prevMsg, input, prevState);
+        const timeout = setTimeout(() => {
+            if (!canResetManual()) {
+                setResetTimeout();
+                return;
+            }
+            resetManual();
+        }, 5 * 60 * 1000) // 5 minutes
+
+        context.set("timoeut", timeout);
+    }
+
+    function canResetManual() {
+        const newOutput = stateMachine(getPrevMsg(), getPrevMsgOrDefault(), getPrevStateOrDefault());
+        return newOutput?.reason !== "Luminance";
+    }
+
+    function resetManual() {
+        const newOutput = stateMachine(getPrevMsg(), getPrevMsgOrDefault(), getPrevStateOrDefault());
         if (!newOutput) {
             node.warn("No new state after manual timeout, keeping current state.");
         } else {
             context.set("prevState", newOutput)
             node.send(wrapOutput(newOutput));
         }
+    }
+
+    function getPrevMsg(): LightInput | undefined {
+        return context.get("prevMsg");
+    }
+
+    function getPrevMsgOrDefault(): LightInput {
+        const prevMsg = context.get("prevMsg") ?? { luminance: 0, directOccupancy: false, adjacentOccupancy: false }
+        if (!context.get("prevMsg")) {
+            node.error("No previous message found.");
+        }
+        return prevMsg;
+    }
+
+    function getPrevStateOrDefault(): LightOutput {
+        const prevState = context.get("prevState") ?? { light: Light.Off, reason: "Init" }
+        if (!context.get("prevMsg")) {
+            node.error("No previous message found.");
+        }
+        return prevState;
     }
 
     function stateMachine(prevInput: LightInput | undefined, currInput: LightInput, prevState: LightOutput): LightOutput | undefined {
