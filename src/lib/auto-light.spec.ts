@@ -108,8 +108,6 @@ describe('Manual', () => {
         const node = new DummyNodeRed();
         const state = setupState(Light.Off, { new_state: { attributes: { event_type: "single_push" } } }, defaultSettings, undefined, node);
         expect(state).toEqual({ light: Light.Direct, reason: "Manual" });
-        jest.runOnlyPendingTimers();
-        expect(node.lastEmit?.[0].payload).toEqual({ light: Light.Off, reason: "Leaving" });
     });
 
     test('should toggle light off', () => {
@@ -117,7 +115,7 @@ describe('Manual', () => {
         const state = setupState(Light.Adjacent, { new_state: { attributes: { event_type: "single_push" } } }, defaultSettings, undefined, node);
         expect(state).toEqual({ light: Light.Off, reason: "Manual" });
         jest.runOnlyPendingTimers();
-        expect(node.lastEmit?.[0].payload).toEqual(undefined);
+        expect(node.lastEmit?.[0]).toEqual(undefined);
     });
 
     test('should toggle light off', () => {
@@ -125,10 +123,10 @@ describe('Manual', () => {
         const state = setupState(Light.Direct, { new_state: { attributes: { event_type: "single_push" } } }, defaultSettings, undefined, node);
         expect(state).toEqual({ light: Light.Off, reason: "Manual" });
         jest.runOnlyPendingTimers();
-        expect(node.lastEmit?.[0].payload).toEqual(undefined);
+        expect(node.lastEmit?.[0]).toEqual(undefined);
     });
 
-    test('should return to automatic after timeout', () => {
+    test('should return to automatic (manual on) after 20 minutes of no occupancy', () => {
         const node = new DummyNodeRed();
         const env = new Map(Object.entries(defaultSettings)) as any;
 
@@ -145,18 +143,22 @@ describe('Manual', () => {
             node,
         )
         expect(state?.[0]?.payload).toEqual({ light: Light.Direct, reason: "Manual" });
-        jest.runOnlyPendingTimers();
-        expect(node.lastEmit?.[0].payload).toEqual({ light: Light.Off, reason: "Leaving" });
+
+        jest.advanceTimersByTime(19 * 60 * 1000);
+        expect(node.lastEmit?.[0]).toEqual(undefined);
+
+        jest.advanceTimersByTime(60 * 1000);
+        expect(node.lastEmit?.[0]?.payload).toEqual({ light: Light.Off, reason: "Leaving" });
     });
 
-    test('should keep in manual (on) if light is on and occupancy', () => {
+    test('should not return to automatic (manual on) if occupancy occurs within 20 minutes', () => {
         const node = new DummyNodeRed();
         const env = new Map(Object.entries(defaultSettings)) as any;
 
         const context = new Map<ContextKeys, any>();
         const prevLightState: LightOutput = { light: Light.Off, reason: "Init" };
         context.set("prevState", prevLightState);
-        const prevMsg: LightInput = { luminance: 999, directOccupancy: true, adjacentOccupancy: false };
+        const prevMsg: LightInput = { luminance: 0, directOccupancy: false, adjacentOccupancy: false };
         context.set("prevMsg", prevMsg);
 
         const state = lightState(
@@ -166,8 +168,118 @@ describe('Manual', () => {
             node,
         )
         expect(state?.[0]?.payload).toEqual({ light: Light.Direct, reason: "Manual" });
-        jest.runOnlyPendingTimers();
-        expect(node.lastEmit?.[0].payload).toEqual(undefined);
+
+        // After 10 minutes, occupancy occurs -> should postpone the auto return
+        jest.advanceTimersByTime(10 * 60 * 1000);
+        lightState(
+            { payload: { luminance: 0, directOccupancy: true, adjacentOccupancy: false } },
+            context,
+            env,
+            node,
+        );
+        expect(node.lastEmit?.[0]).toEqual(undefined);
+
+        // 15 more minutes from start (total 25) but only 15 since last occupancy -> still no auto return
+        jest.advanceTimersByTime(15 * 60 * 1000);
+        expect(node.lastEmit?.[0]).toEqual(undefined);
+
+        // Occupancy ends -> start new 20-minute window
+        lightState(
+            { payload: { luminance: 0, directOccupancy: false, adjacentOccupancy: false } },
+            context,
+            env,
+            node,
+        );
+
+        jest.advanceTimersByTime(20 * 60 * 1000);
+        expect(node.lastEmit?.[0]?.payload).toEqual({ light: Light.Off, reason: "Leaving" });
+    });
+
+    test('should return to automatic (manual off) after 3 minutes of no occupancy (verified by next sensor input)', () => {
+        const node = new DummyNodeRed();
+        const env = new Map(Object.entries(defaultSettings)) as any;
+
+        const context = new Map<ContextKeys, any>();
+        const prevLightState: LightOutput = { light: Light.Direct, reason: "Init" };
+        context.set("prevState", prevLightState);
+        const prevMsg: LightInput = { luminance: 0, directOccupancy: false, adjacentOccupancy: false };
+        context.set("prevMsg", prevMsg);
+
+        const state = lightState(
+            { payload: { new_state: { attributes: { event_type: "single_push" } } } },
+            context,
+            env,
+            node,
+        )
+        expect(state?.[0]?.payload).toEqual({ light: Light.Off, reason: "Manual" });
+
+        // Wait full 3 minutes (no status tested)
+        jest.advanceTimersByTime(3 * 60 * 1000);
+
+        // Next sensor input should now be processed automatically -> expect Direct on (dark + occupancy)
+        const out = lightState(
+            { payload: { luminance: 0, directOccupancy: true, adjacentOccupancy: false } },
+            context,
+            env,
+            node,
+        );
+        expect(out?.[0]?.payload).toEqual({ light: Light.Direct, reason: "Entering" });
+    });
+
+    test('should not return to automatic (manual off) if occupancy occurs within 3 minutes', () => {
+        const node = new DummyNodeRed();
+        const env = new Map(Object.entries(defaultSettings)) as any;
+
+        const context = new Map<ContextKeys, any>();
+        const prevLightState: LightOutput = { light: Light.Direct, reason: "Init" };
+        context.set("prevState", prevLightState);
+        const prevMsg: LightInput = { luminance: 0, directOccupancy: false, adjacentOccupancy: false };
+        context.set("prevMsg", prevMsg);
+
+        const state = lightState(
+            { payload: { new_state: { attributes: { event_type: "single_push" } } } },
+            context,
+            env,
+            node,
+        )
+        expect(state?.[0]?.payload).toEqual({ light: Light.Off, reason: "Manual" });
+
+        // After 2 minutes, occupancy occurs -> should postpone the auto return
+        jest.advanceTimersByTime(2 * 60 * 1000);
+        lightState(
+            { payload: { luminance: 0, directOccupancy: true, adjacentOccupancy: false } },
+            context,
+            env,
+            node,
+        );
+
+        // Even after another 2 minutes (total 4), still manual mode -> sensor input should be ignored (no state change)
+        jest.advanceTimersByTime(2 * 60 * 1000);
+        const ignored = lightState(
+            { payload: { luminance: 0, directOccupancy: true, adjacentOccupancy: false } },
+            context,
+            env,
+            node,
+        );
+        expect(ignored).toEqual(undefined);
+
+        // Occupancy ends -> start new 3-minute window
+        lightState(
+            { payload: { luminance: 0, directOccupancy: false, adjacentOccupancy: false } },
+            context,
+            env,
+            node,
+        );
+
+        // After 3 minutes more, next sensor input should be processed automatically -> expect Direct on
+        jest.advanceTimersByTime(3 * 60 * 1000);
+        const out2 = lightState(
+            { payload: { luminance: 0, directOccupancy: true, adjacentOccupancy: false } },
+            context,
+            env,
+            node,
+        );
+        expect(out2?.[0]?.payload).toEqual({ light: Light.Direct, reason: "Entering" });
     });
 
     test('should ignore input changes in manual mode', () => {

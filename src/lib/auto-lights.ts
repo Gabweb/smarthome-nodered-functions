@@ -1,15 +1,39 @@
 import { Light } from "./lights";
 import { NodeRed, NodeRedMsg, NodeRedOutput } from "./node-red";
 
+/**
+ * Context and requirements summary
+ * Purpose: Node-RED function for occupancy-based automatic lights. Computes LightOutput states (Direct, Adjacent, Off) based on luminance and occupancy; integrates with a separate transition module.
+ * Inputs:
+ * Sensor messages: LightInput { directOccupancy?, adjacentOccupancy?, luminance? }
+ * Button messages: ButtonMsg with event_type (single_push used)
+ * Behavior:
+ * Automatic mode: stateMachine decides transitions (Entering, Leaving, Luminance) using thresholds and hysteresis.
+ * Manual mode: triggered by single_push; toggles light between Direct and Off (reason: Manual).
+ * While Manual, sensor messages only update prevMsg and manage a manual auto-return timer; they do not change the light state.
+ * Return to automatic is occupancy-aware using direct OR adjacent occupancy:
+ * Manual ON (Direct): 20 minutes of continuous no occupancy
+ * Manual OFF (Off): 3 minutes of continuous no occupancy
+ * If occupancy occurs, timer is cleared; when occupancy ends, a new full-duration timer is armed.
+ * Upon timer completion:
+ * If stateMachine yields a state change: send wrapOutput(newState)
+ * If no change: send a status-only message using wrapOutput(undefined, statusOnly) where statusOnly has reason "Leaving" and the current light.
+ * Outputs:
+ * Primary: { payload: LightOutput } when state changes
+ * Secondary: { payload: { fill, text } } for debug/status (also used standalone when only status is emitted)
+ */
+
 // NodeRed Msg -----------------------------------
 export type LightStateMsg = NodeRedMsg<LightInput | ButtonMsg>
 
+// Inputs provided by NodeRed into the Flow. 
 export interface LightInput {
     directOccupancy?: boolean;
     adjacentOccupancy?: boolean;
     luminance?: number;
 }
 
+// Represents a button press from HomeAssistant
 export interface ButtonMsg {
     new_state: {
         attributes: {
@@ -44,13 +68,26 @@ function stateToFill(output: LightOutput) {
     }
 }
 
-function wrapOutput(output: LightOutput): [{ payload: LightOutput }, { payload: any }] {
+function wrapOutput(output: LightOutput | undefined, statusFor?: LightOutput): NodeRedOutput<LightOutput> {
+    if (output) {
+        return [
+            {
+                payload: output
+            },
+            {
+                payload: { fill: stateToFill(output), text: output.light + " (" + output.reason + ")" },
+            }
+        ];
+    }
+
+    if (!statusFor) {
+        return undefined;
+    }
+
     return [
+        undefined,
         {
-            payload: output
-        },
-        {
-            payload: { fill: stateToFill(output), text: output.light + " (" + output.reason + ")" },
+            payload: { fill: stateToFill(statusFor), text: statusFor.light + " (" + statusFor.reason + ")" },
         }
     ];
 }
@@ -68,6 +105,10 @@ export function lightState(
     env: Map<keyof LightSettings, any>,
     node: NodeRed,
 ): NodeRedOutput<LightOutput> {
+    // Hard-coded durations (structured for future configurability)
+    const MANUAL_ON_NO_OCCUPANCY_MS = 20 * 60 * 1000; // 20 minutes
+    const MANUAL_OFF_NO_OCCUPANCY_MS = 3 * 60 * 1000; // 3 minutes
+
     // Main -----------------------------------
     return main();
 
@@ -84,15 +125,19 @@ export function lightState(
         let newState: LightOutput | undefined;
 
         if (isButtonPress(currMsg)) {
-            if (currMsg.new_state.attributes.event_type === "single_push") {
+            if (isSinglePush(currMsg)) {
                 newState = {
                     light: prevState.light == Light.Off ? Light.Direct : Light.Off,
                     reason: "Manual"
                 };
 
-                setResetTimeout();
+                // Enter manual mode and schedule/reset manual auto-return based on occupancy
+                scheduleManualAutoReturnIfNeeded(newState);
             }
-        } else if (prevState.reason !== "Manual") {
+        } else if (prevState.reason === "Manual") {
+            // In manual mode: manage timer based on current occupancy, do not change light state
+            scheduleManualAutoReturnIfNeeded();
+        } else {
             newState = stateMachine(prevMsg, currMsg, prevState);
         }
 
@@ -102,33 +147,54 @@ export function lightState(
         }
     }
 
-    function setResetTimeout() {
+    function scheduleManualAutoReturnIfNeeded(manualState?: LightOutput) {
+        const lastInput = getPrevMsgOrDefault();
+        const occupancy = occupancyPresent(lastInput);
+        const currentState = manualState ?? getPrevStateOrDefault();
+
+        // Clear any pending timer first
         clearTimeout(context.get("timoeut"));
 
+        if (currentState.reason !== "Manual") {
+            return;
+        }
+
+        if (occupancy) {
+            // Occupancy present -> do not arm timer
+            return;
+        }
+
+        const duration = currentState.light === Light.Off ? MANUAL_OFF_NO_OCCUPANCY_MS : MANUAL_ON_NO_OCCUPANCY_MS;
         const timeout = setTimeout(() => {
-            if (!canResetManual()) {
-                setResetTimeout();
+            const latest = getPrevMsgOrDefault();
+            if (occupancyPresent(latest)) {
+                // Occupancy resumed -> re-arm full duration from now
+                scheduleManualAutoReturnIfNeeded();
                 return;
             }
-            resetManual();
-        }, 5 * 60 * 1000) // 5 minutes
+            // No occupancy for full duration -> exit manual and return to automatic
+            returnToAutomatic();
+        }, duration);
 
         context.set("timoeut", timeout);
     }
 
-    function canResetManual() {
-        const newOutput = stateMachine(getPrevMsg(), getPrevMsgOrDefault(), getPrevStateOrDefault());
-        return newOutput?.reason !== "Luminance";
-    }
-
-    function resetManual() {
+    function returnToAutomatic() {
         const newOutput = stateMachine(getPrevMsg(), getPrevMsgOrDefault(), getPrevStateOrDefault());
         if (!newOutput) {
-            node.warn("No new state after manual timeout, keeping current state.");
+            // Exit manual without state change -> emit status-only message and update prevState reason
+            const current = getPrevStateOrDefault();
+            const statusOnly: LightOutput = { light: current.light, reason: "Leaving" };
+            context.set("prevState", statusOnly);
+            node.send(wrapOutput(undefined, statusOnly));
         } else {
             context.set("prevState", newOutput)
             node.send(wrapOutput(newOutput));
         }
+    }
+
+    function occupancyPresent(input: LightInput): boolean {
+        return (input.directOccupancy ?? false) || (input.adjacentOccupancy ?? false);
     }
 
     function getPrevMsg(): LightInput | undefined {
@@ -227,5 +293,9 @@ export function lightState(
 
     function isButtonPress(input: LightInput | ButtonMsg): input is ButtonMsg {
         return (input as ButtonMsg).new_state !== undefined;
+    }
+
+    function isSinglePush(input: ButtonMsg): boolean {
+        return input.new_state.attributes.event_type === "single_push"
     }
 }
